@@ -183,41 +183,51 @@ angular.module('angularfire-multi-auth', ['firebase']);
                     /*
                      This method will be used to associate a social account to the current logged user
                      */
-                    function associateSocial(provider) {
+                    function associateSocial(provider, token) {
                         var deferred = $q.defer();
                         var newRef = new Firebase(FBURL_ALTERNATE);
                         var newAuth = $delegate(newRef);
                         var currentUser = auth.$getAuth();
 
+                        var associateUser = function (user) {
+                            var userMappingRef = new Firebase(ref.root() + '/userMapping/' + user.uid);
+                            userMappingRef.once('value', function (snapshot) {
+                                var exists = (snapshot.val() !== null);
+                                if (exists) {
+                                    deferred.reject('You are already associated to another account');
+                                } else {
+                                    var authGroupRefNew = new Firebase(ref.root() + '/authGroup/' + currentUser.authGroup);
+                                    var authGroupRec = {};
+                                    authGroupRec[user.provider] = user.uid;
+                                    authGroupRefNew.update(authGroupRec, function () {
+                                        var userMappingRef = new Firebase(ref.root() + '/userMapping');
+                                        var userMappingRec = {};
+                                        userMappingRec[user.uid] = currentUser.authGroup;
+                                        userMappingRef.update(userMappingRec, function () {
+                                            newAuth.$unauth();
+                                            deferred.resolve(user);
+                                        });
+                                    });
+                                }
+                            });
+                        };
+
                         var authGroupRef = new Firebase(ref.root() + '/authGroup/' + currentUser.authGroup);
                         authGroupRef.orderByKey().equalTo(provider).once('value', function (snapshot) {
                             if (provider === currentUser.provider || snapshot.val() !== null) {
                                 deferred.reject('You are already using a ' + provider + ' account.');
-                            } else {
+                            } else if (token) {
                                 newAuth.$authWithOAuthPopup(provider)
                                     .then(function (user) {
-                                        var userMappingRef = new Firebase(ref.root() + '/userMapping/' + user.uid);
-                                        userMappingRef.once('value', function (snapshot) {
-                                            var exists = (snapshot.val() !== null);
-                                            if (exists) {
-                                                deferred.reject('You are already associated to another account');
-                                            } else {
-                                                var authGroupRefNew = new Firebase(ref.root() + '/authGroup/' + currentUser.authGroup);
-                                                var authGroupRec = {};
-                                                authGroupRec[user.provider] = user.uid;
-                                                authGroupRefNew.update(authGroupRec, function () {
-                                                    var userMappingRef = new Firebase(ref.root() + '/userMapping');
-                                                    var userMappingRec = {};
-                                                    userMappingRec[user.uid] = currentUser.authGroup;
-                                                    userMappingRef.update(userMappingRec, function () {
-                                                        newAuth.$unauth();
-                                                        deferred.resolve(user);
-                                                    });
-                                                });
-                                            }
-
-                                        });
-
+                                        associateUser(user);
+                                    })
+                                    .catch(function (err) {
+                                        deferred.reject(err);
+                                    });
+                            } else {
+                                newAuth.authWithOAuthToken(provider, token)
+                                    .then(function (user) {
+                                        associateUser(user);
                                     })
                                     .catch(function (err) {
                                         deferred.reject(err);
@@ -360,7 +370,9 @@ angular.module('angularfire-multi-auth', ['firebase']);
                             var userMappingRef = new Firebase(ref.root() + '/userMapping');
                             var userMappingRec = {};
                             userMappingRec[user.uid] = authGroup.key();
-                            userMappingRef.update(userMappingRec, updateCallBack(authGroup));
+                            userMappingRef.update(userMappingRec).then(function () {
+                                updateCallBack(authGroup);
+                            });
                         });
                         return user;
                     }
@@ -406,6 +418,6 @@ angular.module('angularfire-multi-auth', ['firebase']);
 
                 return $delegate;
 
-                    }]);
             }]);
+        }]);
 })();
